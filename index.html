@@ -1,0 +1,455 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f7ae0">
+<title>Protocolo de despegue</title>
+<style>
+  :root{
+    --pw:min(86vw,440px);          /* ancho del avión */
+    --H:100vh;                     /* alto de la escena (lo ajusta el JS) */
+    --orange:#ff5a36;
+    --navy:#1c2b4a;
+    --cream:#fff4e0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#1f7ae0;
+    font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--navy);
+    -webkit-tap-highlight-color:transparent}
+
+  /* ---------- ESCENA ---------- */
+  #stage{position:fixed;inset:0;overflow:hidden;
+    background:linear-gradient(#1f7ae0 0%,#6fb9ff 55%,#d7efff 100%)}
+  #clouds{position:absolute;inset:0;pointer-events:none}
+  .cloud{position:absolute;left:0;top:0;width:var(--w);height:var(--h);background:#fff;
+    border-radius:999px;will-change:transform}
+  .cloud::before,.cloud::after{content:"";position:absolute;background:#fff;border-radius:50%}
+  .cloud::before{width:55%;height:170%;left:14%;bottom:30%}
+  .cloud::after{width:40%;height:135%;right:12%;bottom:30%}
+
+  #caption{position:absolute;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);
+    width:min(92vw,520px);background:rgba(255,255,255,.94);padding:10px 14px;border-radius:14px;
+    font-size:15px;line-height:1.35;text-align:center;z-index:10;box-shadow:0 6px 20px rgba(0,0,0,.18)}
+  #caption:empty{display:none}
+
+  #scream{position:absolute;top:26%;left:0;right:0;text-align:center;z-index:9;
+    font-size:clamp(34px,11vw,68px);font-weight:900;color:#fff;letter-spacing:1px;
+    text-shadow:0 4px 0 var(--orange),0 8px 18px rgba(0,0,0,.35);opacity:0;pointer-events:none}
+  .ph-fall #scream{opacity:1;animation:shake .12s linear infinite}
+  @keyframes shake{0%{transform:translate(0,0) rotate(-1.5deg)}50%{transform:translate(3px,-3px) rotate(1.5deg)}100%{transform:translate(-3px,2px) rotate(-1.5deg)}}
+
+  /* Grito de alegría cuando se abre el paracaídas */
+  #cheer{position:absolute;top:18%;left:0;right:0;text-align:center;z-index:9;
+    font-size:clamp(34px,11vw,68px);font-weight:900;color:#fff;letter-spacing:1px;
+    text-shadow:0 4px 0 #25a244,0 8px 18px rgba(0,0,0,.35);opacity:0;pointer-events:none}
+  .ph-chute #cheer{animation:cheer 3s ease-out forwards}
+  @keyframes cheer{
+    0%{opacity:0;transform:scale(.4) rotate(-6deg)}
+    10%{opacity:1;transform:scale(1.2) rotate(3deg)}
+    20%{transform:scale(1) rotate(-2deg)}
+    80%{opacity:1;transform:scale(1.04) rotate(2deg) translateY(-6px)}
+    100%{opacity:0;transform:scale(1) rotate(0) translateY(-22px)}}
+
+  /* avión */
+  #plane{position:absolute;left:50%;top:14%;width:var(--pw);z-index:3;
+    transform:translate(calc(-50% - 130vw),0);transition:transform 2s ease-out}
+  .ph-plane #plane,.ph-jump #plane{transform:translate(-50%,0)}
+  .ph-fall #plane,.ph-chute #plane,.ph-land #plane{transform:translate(calc(-50% + 140vw),-8vh);transition:transform 2.4s ease-in}
+  .plane-bob{position:relative;animation:bob 2.2s ease-in-out infinite}
+  @keyframes bob{0%,100%{transform:translateY(0) rotate(-1deg)}50%{transform:translateY(-8px) rotate(1deg)}}
+  .plane-bob svg{display:block;width:100%;height:auto}
+  .prop{transform-box:fill-box;transform-origin:center;animation:prop .12s linear infinite alternate}
+  @keyframes prop{from{transform:scaleY(1)}to{transform:scaleY(.2)}}
+
+  .pilot{position:absolute;left:75%;top:50%;width:15%;aspect-ratio:1;transform:translate(-50%,-50%)}
+  .pilot .face{width:100%;height:100%}
+  .pilot .cap{position:absolute;left:-6%;right:-6%;top:-20%;height:48%;background:var(--navy);
+    border-radius:60% 60% 6px 6px / 100% 100% 6px 6px;z-index:2}
+  .pilot .cap::after{content:"";position:absolute;left:55%;right:-14%;bottom:-6px;height:8px;background:#0f1a30;border-radius:4px}
+
+  /* cara circular (con foto o emoji de respaldo) */
+  .face{border-radius:50%;overflow:hidden;border:3px solid #fff;background:#ffd9a8;
+    display:grid;place-items:center;font-size:clamp(20px,6vw,30px);box-shadow:0 3px 8px rgba(0,0,0,.25)}
+  .face img{width:100%;height:100%;object-fit:cover;display:block}
+
+  /* paracaidista */
+  /* Se mueve solo con transform (fluido). --H = alto real de la escena, lo setea el JS */
+  #jumper{position:absolute;left:50%;top:0;width:90px;margin-left:-45px;z-index:2;opacity:0;will-change:transform;
+    transform:translateY(calc(var(--H)*.14 + var(--pw)*.425 - 56px))}
+  .ph-fall #jumper{opacity:1;transform:translateY(calc(var(--H)*.5));
+    transition:transform 1.6s cubic-bezier(.4,0,.8,.8),opacity .1s}
+  /* Con el paracaídas abierto, el descenso es UN solo movimiento continuo hasta el pasto
+     (frena rápido al abrirse y llega suave). Mismo transition en las dos fases para que no se corte. */
+  .ph-chute #jumper,.ph-land #jumper{opacity:1;
+    transform:translateY(calc(var(--H)*.89 - 112px));   /* pies dentro del pasto */
+    transition:transform 6.6s cubic-bezier(.3,.45,.45,1)}
+
+  .sway{transform-origin:50% -150px}
+  @keyframes sway{0%,100%{transform:rotate(-7deg)}50%{transform:rotate(7deg)}}
+
+  .person{position:relative;width:90px}
+  .person .face{width:54px;height:54px;margin:0 auto -22px;position:relative;z-index:2}
+  .person svg{display:block;width:90px;height:84px;overflow:visible}
+  .ph-fall .person{animation:wig .22s ease-in-out infinite alternate}
+  @keyframes wig{from{transform:rotate(-12deg)}to{transform:rotate(12deg)}}
+  .pose-chute{display:none}
+  .ph-chute .pose-fall,.ph-land .pose-fall{display:none}
+  .ph-chute .pose-chute,.ph-land .pose-chute{display:inline}
+
+  .chute{position:absolute;left:50%;bottom:calc(100% - 6px);width:260px;margin-left:-130px;
+    transform-origin:50% 100%;transform:scale(.05);opacity:0;
+    transition:transform .7s cubic-bezier(.2,1.5,.4,1),opacity .2s}
+  .chute svg{display:block;width:100%;height:auto}
+  .ph-chute .chute,.ph-land .chute{opacity:1;transform:scale(1)}
+  .ph-land .chute{transform:scale(1.15,.2);transition:transform 1s ease-in 3.2s}
+
+  /* suelo */
+  #ground{position:absolute;left:0;right:0;bottom:0;height:calc(var(--H)*.21);z-index:1;will-change:transform;
+    transform:translateY(110%);transition:transform 3s ease-out}
+  .ph-land #ground{transform:none}
+  #ground svg{position:absolute;inset:0;width:100%;height:100%}
+  #ground .deco{position:absolute;font-size:clamp(26px,7vw,44px)}
+
+  #skip{position:absolute;right:12px;bottom:max(12px,env(safe-area-inset-bottom));z-index:12;
+    background:rgba(255,255,255,.75);border:0;border-radius:999px;padding:8px 14px;font-size:13px;
+    color:var(--navy);cursor:pointer}
+
+  /* ---------- INTRO ---------- */
+  #intro{position:fixed;inset:0;z-index:60;background:rgba(8,16,34,.9);display:grid;place-items:center;
+    padding:20px;transition:opacity .5s}
+  #intro.hide{opacity:0;pointer-events:none}
+  .alert{width:min(94vw,440px);background:#fff;border-radius:20px;padding:26px 22px;text-align:center;
+    border-top:10px solid #e8362a;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .siren{width:46px;height:46px;border-radius:50%;background:#e8362a;margin:-52px auto 12px;
+    border:5px solid #fff;animation:siren .8s ease-in-out infinite alternate}
+  @keyframes siren{from{box-shadow:0 0 0 0 rgba(232,54,42,.7);background:#e8362a}
+    to{box-shadow:0 0 0 18px rgba(232,54,42,0);background:#ff8a7e}}
+  .alert h2{font-size:13px;letter-spacing:3px;color:#e8362a;margin-bottom:10px}
+  .alert p{font-size:18px;line-height:1.4;margin-bottom:18px}
+  .btn{display:inline-block;border:0;cursor:pointer;text-decoration:none;font-weight:800;font-size:17px;
+    padding:14px 24px;border-radius:14px;background:var(--orange);color:#fff;
+    box-shadow:0 5px 0 #c63f21;transition:transform .1s,box-shadow .1s}
+  .btn:active{transform:translateY(4px);box-shadow:0 1px 0 #c63f21}
+  .btn.alt{background:#25a244;box-shadow:0 5px 0 #1a7a31}
+
+  /* ---------- REVELACIÓN ---------- */
+  #reveal{position:fixed;inset:0;z-index:40;overflow-y:auto;background:var(--cream);
+    opacity:0;pointer-events:none;transition:opacity .9s}
+  #reveal.show{opacity:1;pointer-events:auto}
+  .card{max-width:560px;margin:0 auto;padding:34px 20px 70px;text-align:center}
+  .kicker{font-size:15px;font-weight:700;color:var(--orange);margin-bottom:8px}
+  .card .subtitle{font-size:clamp(20px,5.5vw,28px);font-weight:800;line-height:1.15;margin-bottom:8px}
+  .card h1{font-size:clamp(30px,8vw,44px);line-height:1.1;margin-bottom:14px}
+  .lead{font-size:17px;line-height:1.5;margin-bottom:22px}
+  .info{background:#fff;border-radius:16px;padding:14px 16px;text-align:left;margin-bottom:18px;
+    box-shadow:0 4px 14px rgba(28,43,74,.1)}
+  .info .row{padding:8px 0;border-bottom:1px dashed #e5d6bb;font-size:16px}
+  .info .row:last-child{border-bottom:0}
+  .info b{display:block;font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#8a7a5c;margin-bottom:2px}
+  .info ul{margin:4px 0 0 20px}
+  #countdown{display:flex;gap:8px;justify-content:center;margin-bottom:22px}
+  #countdown[hidden]{display:none}
+  #countdown div{background:var(--navy);color:#fff;border-radius:12px;padding:10px 0;width:70px}
+  #countdown strong{display:block;font-size:26px}
+  #countdown span{font-size:11px;opacity:.8;letter-spacing:1px}
+  .card h2{font-size:21px;margin:26px 0 10px}
+  .check{list-style:none;text-align:left;background:#fff;border-radius:16px;padding:8px 16px;
+    box-shadow:0 4px 14px rgba(28,43,74,.1)}
+  .check label{display:flex;gap:12px;align-items:center;padding:12px 0;font-size:17px;cursor:pointer}
+  .check li+li{border-top:1px dashed #e5d6bb}
+  .check input{width:24px;height:24px;accent-color:#25a244}
+  #brave{font-weight:700;margin-top:10px;min-height:24px;color:#1a7a31}
+  .actions{display:flex;flex-direction:column;gap:12px;align-items:center;margin:14px 0 6px}
+  .small{font-size:13px;opacity:.7;margin-top:8px}
+  .cert{margin:34px 0 10px;background:#fffdf3;border:4px double #c9a227;border-radius:10px;padding:22px 16px;
+    font-family:Georgia,"Times New Roman",serif;transform:rotate(-1.2deg)}
+  .cert .t{font-size:13px;letter-spacing:3px;color:#8a6d00}
+  .cert .n{font-size:30px;font-weight:700;margin:8px 0;text-transform:capitalize}
+  .cert p{font-size:15px;line-height:1.5}
+  .sign{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:26px;font-size:17px}
+  .sign .face{width:56px;height:56px;flex:none}
+  .link{background:none;border:0;color:var(--navy);text-decoration:underline;font-size:14px;margin-top:22px;cursor:pointer;opacity:.7}
+
+  .confetti{position:fixed;top:-16px;width:9px;height:14px;z-index:80;pointer-events:none;
+    animation:cf linear forwards}
+  @keyframes cf{to{transform:translate(var(--dx),110vh) rotate(var(--r))}}
+</style>
+</head>
+<body>
+
+<!-- ================= ESCENA ================= -->
+<div id="stage">
+  <div id="clouds"></div>
+  <div id="scream">¡AAAAAAAAA!</div>
+  <div id="cheer">¡IUJUUUUU!</div>
+
+  <!-- Avión con TU cara en el cockpit -->
+  <div id="plane">
+    <div class="plane-bob">
+      <svg viewBox="0 0 400 170" aria-hidden="true">
+        <path d="M30 85 L8 22 L72 22 L98 85Z" fill="#ff5a36"/>
+        <path d="M170 105 L262 105 L214 162 L146 162Z" fill="#dfe7f2" stroke="#c0cde0" stroke-width="3"/>
+        <ellipse cx="200" cy="95" rx="175" ry="42" fill="#f4f7fb" stroke="#c0cde0" stroke-width="3"/>
+        <path d="M38 104 Q200 124 362 104" stroke="#ff5a36" stroke-width="8" fill="none" stroke-linecap="round"/>
+        <circle cx="130" cy="82" r="9" fill="#9fd6ff"/><circle cx="165" cy="82" r="9" fill="#9fd6ff"/>
+        <circle cx="200" cy="82" r="9" fill="#9fd6ff"/>
+        <circle cx="300" cy="85" r="34" fill="#9fd6ff" stroke="#c0cde0" stroke-width="4"/>
+        <rect class="prop" x="372" y="58" width="9" height="74" rx="4" fill="#444"/>
+      </svg>
+      <div class="pilot"><div class="face" id="facePilot"></div><div class="cap"></div></div>
+    </div>
+  </div>
+
+  <!-- Ella, con SU cara -->
+  <div id="jumper">
+    <div class="sway">
+      <div class="chute">
+        <svg viewBox="0 0 260 150" aria-hidden="true">
+          <defs><clipPath id="dome"><path d="M6 108 Q130 -40 254 108 Q192 132 130 108 Q68 132 6 108Z"/></clipPath></defs>
+          <g stroke="#333" stroke-width="1.6" opacity=".7">
+            <line x1="12" y1="110" x2="130" y2="150"/><line x1="68" y1="118" x2="130" y2="150"/>
+            <line x1="192" y1="118" x2="130" y2="150"/><line x1="248" y1="110" x2="130" y2="150"/>
+          </g>
+          <g clip-path="url(#dome)">
+            <rect x="0" y="0" width="260" height="150" fill="#ff5a36"/>
+            <ellipse cx="130" cy="112" rx="102" ry="220" fill="#fff"/>
+            <ellipse cx="130" cy="112" rx="68" ry="220" fill="#ffc93c"/>
+            <ellipse cx="130" cy="112" rx="34" ry="220" fill="#ff5a36"/>
+          </g>
+          <path d="M6 108 Q130 -40 254 108 Q192 132 130 108 Q68 132 6 108Z" fill="none" stroke="#c63f21" stroke-width="3"/>
+        </svg>
+      </div>
+      <div class="person">
+        <div class="face" id="faceElla"></div>
+        <svg viewBox="0 -14 90 84" aria-hidden="true">
+          <g class="pose-fall">
+            <line x1="32" y1="8" x2="6" y2="-8" stroke="#ff5a36" stroke-width="10" stroke-linecap="round"/>
+            <line x1="58" y1="8" x2="84" y2="-8" stroke="#ff5a36" stroke-width="10" stroke-linecap="round"/>
+            <circle cx="5" cy="-9" r="5.5" fill="#ffd9a8"/><circle cx="85" cy="-9" r="5.5" fill="#ffd9a8"/>
+            <line x1="38" y1="34" x2="22" y2="66" stroke="#1c2b4a" stroke-width="10" stroke-linecap="round"/>
+            <line x1="52" y1="34" x2="68" y2="66" stroke="#1c2b4a" stroke-width="10" stroke-linecap="round"/>
+          </g>
+          <g class="pose-chute">
+            <line x1="30" y1="8" x2="14" y2="-14" stroke="#ff5a36" stroke-width="10" stroke-linecap="round"/>
+            <line x1="60" y1="8" x2="76" y2="-14" stroke="#ff5a36" stroke-width="10" stroke-linecap="round"/>
+            <circle cx="13" cy="-15" r="5.5" fill="#ffd9a8"/><circle cx="77" cy="-15" r="5.5" fill="#ffd9a8"/>
+            <line x1="40" y1="34" x2="38" y2="66" stroke="#1c2b4a" stroke-width="10" stroke-linecap="round"/>
+            <line x1="50" y1="34" x2="52" y2="66" stroke="#1c2b4a" stroke-width="10" stroke-linecap="round"/>
+          </g>
+          <rect x="26" y="0" width="38" height="40" rx="13" fill="#ff5a36"/>
+          <rect x="26" y="22" width="38" height="6" fill="#c63f21"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+
+  <div id="ground">
+    <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 38 Q90 0 190 30 T400 22 V100 H0Z" fill="#5cbf5a"/>
+      <path d="M0 62 Q110 36 220 58 T400 50 V100 H0Z" fill="#3fa043"/>
+    </svg>
+    <span class="deco" style="left:6%;bottom:46%">🌳</span>
+    <span class="deco" style="left:80%;bottom:50%">🌲</span>
+    <span class="deco" style="left:68%;bottom:14%">🐄</span>
+  </div>
+
+  <button id="skip" type="button">Saltar animación ⏭</button>
+</div>
+
+<!-- ================= INTRO ================= -->
+<div id="intro">
+  <div class="alert">
+    <div class="siren"></div>
+    <h2>ALERTA</h2>
+    <p>Se detectó a <b data-ella></b> con los pies <b>demasiado cerca del suelo</b>.<br>Corresponde iniciar el protocolo de despegue.</p>
+    <button class="btn" id="start" type="button">Iniciar protocolo ☝🏼🤓</button>
+  </div>
+</div>
+
+<!-- ================= REVELACIÓN ================= -->
+<div id="reveal">
+  <div class="card">
+    <p class="subtitle">FELIZ CUMPLE PUPO!</p>
+    <h1>Te regalo un salto en paracaídas 🪂</h1>
+    <p class="lead">jujujujuuuu</p>
+
+    <div class="info" id="info"></div>
+    <div id="countdown" hidden></div>
+
+    <div class="actions">
+      <a class="btn" id="callBtn" href="#"></a>
+    </div>
+
+    <div class="sign"><div class="face" id="faceSign"></div><span>Con amor,<br><b data-yo></b></span></div>
+    <button class="link" id="replay" type="button">↺ Tremenda animación, mirala de nuevo</button>
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   ✏️  EDITÁ ACÁ: nombres, fotos, fecha, teléfono, etc.
+   ============================================================ */
+const CONFIG = {
+  ella: "Vi",                    // su nombre
+  yo: "Jua",           // cómo firmás vos
+  fotoElla: "img/ella.jpeg",           // foto de ELLA (cuadrada, de frente, en la carpeta img)
+  fotoYo: "img/yo.jpeg",               // foto TUYA (para el piloto, en la carpeta img)
+
+  fecha: "A confirmar con el lugar",               // ej: "Sábado 14 de noviembre, 10:00 hs"
+  lugar: "Lobos (perdón están todos lejos)",                          // ej: "Aeródromo X" (si lo dejás vacío no se muestra)
+  incluye: ["Salto", "Video con Handycam"],  // [] para ocultar
+  noIncluye: ["Paracaídas (chiste)"],  // [] para ocultar
+  quellevar: "Ropa cómoda y zapatillas con cordones/cerradas",                             // "" para ocultar
+
+  fechaISO: "",                       // para la cuenta regresiva, ej: "2026-11-14T10:00:00-03:00" ("" = sin cuenta)
+
+  telefono: "",                       // si no usás WhatsApp: teléfono al que llamar, ej "+54 9 11 1234-5678"
+  textoBoton: "Confirmar turno",
+  whatsapp: "5491172374136"           // si lo completás, el botón abre el chat de WhatsApp (solo dígitos, con código de país). "" = el botón llama por teléfono
+};
+/* ============================================================ */
+
+const $ = s => document.querySelector(s);
+const stage = $('#stage');
+function fit(){ stage.style.setProperty('--H', stage.clientHeight + 'px'); }
+fit(); addEventListener('resize', fit);
+
+/* Caras: si la foto carga la usa, si no deja un emoji */
+function setFace(el, src, fallback){
+  el.textContent = fallback;
+  if(!src) return;
+  const img = new Image();
+  img.alt = '';
+  img.onload = () => { el.textContent = ''; el.appendChild(img); };
+  img.src = src;
+}
+setFace($('#facePilot'), CONFIG.fotoYo, '🧑‍✈️');
+setFace($('#faceElla'), CONFIG.fotoElla, '😱');
+setFace($('#faceSign'), CONFIG.fotoYo, '😎');
+document.querySelectorAll('[data-ella]').forEach(e => e.textContent = CONFIG.ella);
+document.querySelectorAll('[data-yo]').forEach(e => e.textContent = CONFIG.yo);
+
+/* Nubes (dan la sensación de velocidad) */
+const clouds = [];
+let W = innerWidth, H = innerHeight;
+addEventListener('resize', () => { W = innerWidth; H = innerHeight; });
+for(let i = 0; i < 12; i++){
+  const el = document.createElement('div');
+  el.className = 'cloud';
+  const w = 90 + Math.random() * 150;
+  el.style.setProperty('--w', w + 'px');
+  el.style.setProperty('--h', (w * .28) + 'px');
+  el.style.opacity = (.45 + Math.random() * .5).toFixed(2);
+  $('#clouds').appendChild(el);
+  clouds.push({ el, x: Math.random() * W, y: Math.random() * H, s: .5 + Math.random() * 1.2 });
+}
+let vx = -30, vy = -10, tvx = -30, tvy = -10, last = performance.now();
+/* Balanceo del paracaídas: lo maneja JS para que la amplitud suba y baje suave (sin cortes) */
+const swayEl = document.querySelector('.sway');
+let amp = 0, tamp = 0, swT = 0;
+function tick(t){
+  const dt = Math.min(.05, (t - last) / 1000); last = t;
+  const k = Math.min(1, dt * 2.5);
+  vx += (tvx - vx) * k; vy += (tvy - vy) * k;
+  swT += dt; amp += (tamp - amp) * Math.min(1, dt * 1.6);
+  swayEl.style.transform = `rotate(${(amp * Math.sin(swT * 2 * Math.PI / 3.2)).toFixed(2)}deg)`;
+  for(const c of clouds){
+    c.x += vx * c.s * dt; c.y += vy * c.s * dt;
+    if(c.y < -120){ c.y = H + 80; c.x = Math.random() * W; }
+    if(c.x < -320){ c.x = W + 60; c.y = Math.random() * H; }
+    if(c.x > W + 320){ c.x = -280; c.y = Math.random() * H; }
+    c.el.style.transform = `translate3d(${c.x}px,${c.y}px,0)`;
+  }
+  requestAnimationFrame(tick);
+}
+requestAnimationFrame(tick);
+
+/* Confeti */
+function confetti(n){
+  for(let i = 0; i < n; i++){
+    const d = document.createElement('div');
+    d.className = 'confetti';
+    d.style.left = Math.random() * 100 + 'vw';
+    d.style.background = `hsl(${Math.random() * 360},90%,60%)`;
+    d.style.animationDuration = (2.5 + Math.random() * 2.5) + 's';
+    d.style.animationDelay = (Math.random() * .8) + 's';
+    d.style.setProperty('--dx', (Math.random() * 200 - 100) + 'px');
+    d.style.setProperty('--r', (Math.random() * 900 + 300) + 'deg');
+    d.addEventListener('animationend', () => d.remove());
+    document.body.appendChild(d);
+  }
+}
+
+/* Línea de tiempo */
+let timers = [];
+const steps = [
+  [0,    'plane', { vx: -260, vy: 0 }],
+  [2600, 'fall',  { vx: 0, vy: -1100 }],
+  [5400, 'chute', { vy: -140, amp: 7 }],
+  [8800, 'land',  { vy: -20, vx: 0 }],
+  [10200,'land',  { amp: 0 }],
+  [13200,'end']
+];
+function play(){
+  fit();
+  $('#intro').classList.add('hide');
+  steps.forEach(([t, ph, sp]) => timers.push(setTimeout(() => {
+    if(ph === 'end'){ showReveal(); return; }
+    stage.className = 'ph-' + ph;
+    if(sp){ if(sp.vx !== undefined) tvx = sp.vx; if(sp.vy !== undefined) tvy = sp.vy; if(sp.amp !== undefined) tamp = sp.amp; }
+  }, t)));
+}
+
+/* Revelación */
+let revealed = false;
+function showReveal(){
+  timers.forEach(clearTimeout); timers = [];
+  if(revealed) return; revealed = true;
+  stage.className = 'ph-land';
+  buildInfo(); buildCall(); startCountdown();
+  $('#reveal').classList.add('show');
+  confetti(130);
+}
+function buildInfo(){
+  const box = $('#info'); box.innerHTML = '';
+  const row = (label, html) => { const r = document.createElement('div'); r.className = 'row'; r.innerHTML = `<b>${label}</b>${html}`; box.appendChild(r); };
+  if(CONFIG.fecha) row('📅 Cuándo', CONFIG.fecha);
+  if(CONFIG.lugar) row('📍 Dónde', CONFIG.lugar);
+  if(CONFIG.incluye && CONFIG.incluye.length) row('🎁 Incluye', '<ul>' + CONFIG.incluye.map(i => `<li>${i}</li>`).join('') + '</ul>');
+  if(CONFIG.noIncluye && CONFIG.noIncluye.length) row('🚫 No incluye', '<ul>' + CONFIG.noIncluye.map(i => `<li>${i}</li>`).join('') + '</ul>');
+  if(CONFIG.quellevar) row('🎒 Qué llevar', CONFIG.quellevar);
+}
+function buildCall(){
+  const call = $('#callBtn');
+  call.textContent = CONFIG.textoBoton;
+  if(CONFIG.whatsapp){
+    call.href = 'https://wa.me/' + CONFIG.whatsapp.replace(/\D/g, '');
+    call.target = '_blank'; call.rel = 'noopener';
+  } else {
+    call.href = 'tel:' + CONFIG.telefono.replace(/[^\d+]/g, '');
+  }
+}
+let cdStarted = false;
+function startCountdown(){
+  if(!CONFIG.fechaISO || cdStarted) return; cdStarted = true;
+  const target = new Date(CONFIG.fechaISO).getTime();
+  const box = $('#countdown'); box.hidden = false;
+  const cell = (n, l) => `<div><strong>${n}</strong><span>${l}</span></div>`;
+  function upd(){
+    let d = target - Date.now();
+    if(d <= 0){ box.innerHTML = '<strong style="font-size:22px">¡Es hoy! 🪂</strong>'; return; }
+    const days = Math.floor(d / 864e5); d %= 864e5;
+    const h = Math.floor(d / 36e5); d %= 36e5;
+    const m = Math.floor(d / 6e4); const s = Math.floor(d % 6e4 / 1e3);
+    box.innerHTML = cell(days, 'DÍAS') + cell(h, 'HS') + cell(m, 'MIN') + cell(s, 'SEG');
+  }
+  upd(); setInterval(upd, 1000);
+}
+
+$('#start').addEventListener('click', play);
+$('#skip').addEventListener('click', () => { $('#intro').classList.add('hide'); showReveal(); });
+$('#replay').addEventListener('click', () => location.reload());
+</script>
+</body>
+</html>
